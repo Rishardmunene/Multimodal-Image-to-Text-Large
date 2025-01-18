@@ -8,8 +8,42 @@ import json
 from src.pipeline.caption_pipeline import CaptionPipeline
 from nltk.translate.bleu_score import sentence_bleu
 import nltk
-nltk.download('punkt')
 import numpy as np
+
+def setup_project_structure(code_root, data_root):
+    """Set up project directories and config files"""
+    # Create necessary directories
+    directories = [
+        os.path.join(code_root, 'config'),
+        os.path.join(data_root, 'data/annotations'),
+        os.path.join(data_root, 'data/images/val2017'),
+        os.path.join(data_root, 'results')
+    ]
+    
+    for dir_path in directories:
+        os.makedirs(dir_path, exist_ok=True)
+    
+    # Create config.yaml if it doesn't exist
+    config_path = os.path.join(code_root, 'config/config.yaml')
+    if not os.path.exists(config_path):
+        config = {
+            'model': {
+                'sdxl_model_path': 'stabilityai/stable-diffusion-xl-base-1.0',
+                'device': 'cuda'
+            },
+            'pipeline': {
+                'max_length': 100,
+                'num_inference_steps': 50,
+                'guidance_scale': 7.5
+            },
+            'processing': {
+                'image_size': 384,
+                'batch_size': 1
+            }
+        }
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f)
+        print(f"Created config file at {config_path}")
 
 def evaluate_captions(generated_caption, ground_truth_captions):
     """Evaluate caption quality using BLEU score"""
@@ -22,11 +56,26 @@ def evaluate_captions(generated_caption, ground_truth_captions):
     return bleu_score
 
 def main():
-    # Get the absolute path to the project root
-    project_root = '/content/project/Multimodal_Image_to_Text_Exp_2'
+    # Define root directories
+    code_root = '/content/project/Multimodal_Image_to_Text_Exp_2/Multimodal Image-to-Text Exp 2'
+    data_root = '/content/project/Multimodal_Image_to_Text_Exp_2'
+    print(f"Code root: {code_root}")
+    print(f"Data root: {data_root}")
+    
+    # Set up project structure
+    setup_project_structure(code_root, data_root)
+    
+    # Verify config file exists
+    config_path = os.path.join(code_root, 'config/config.yaml')
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config file not found at {config_path}")
     
     # Load configuration
-    config = yaml.safe_load(open(os.path.join(project_root, 'config/config.yaml')))
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    
+    # Download NLTK data
+    nltk.download('punkt', quiet=True)
     
     # Initialize pipeline
     pipeline = CaptionPipeline(config)
@@ -41,8 +90,18 @@ def main():
     }
     
     # Set up absolute paths
-    annotations_path = os.path.join(project_root, 'data/annotations/captions_val2017.json')
-    images_dir = os.path.join(project_root, 'data/images/val2017')
+    annotations_path = os.path.join(data_root, 'data/annotations/captions_val2017.json')
+    images_dir = os.path.join(data_root, 'data/images/val2017')
+    
+    # Verify paths exist
+    print(f"Checking paths...")
+    print(f"Annotations path: {annotations_path}")
+    print(f"Images directory: {images_dir}")
+    
+    if not os.path.exists(annotations_path):
+        raise FileNotFoundError(f"Annotations file not found at {annotations_path}")
+    if not os.path.exists(images_dir):
+        raise FileNotFoundError(f"Images directory not found at {images_dir}")
     
     # Process COCO validation set
     coco = COCO(annotations_path)
@@ -89,7 +148,7 @@ def main():
         print(f"\nAverage BLEU score: {avg_bleu:.4f}")
     
     # Create results directory if it doesn't exist
-    results_dir = os.path.join(project_root, 'results')
+    results_dir = os.path.join(data_root, 'results')
     os.makedirs(results_dir, exist_ok=True)
     
     # Save results
