@@ -9,6 +9,26 @@ from src.pipeline.caption_pipeline import CaptionPipeline
 from nltk.translate.bleu_score import sentence_bleu
 import nltk
 import numpy as np
+import ssl
+
+def setup_nltk():
+    """Set up NLTK resources"""
+    try:
+        _create_unverified_https_context = ssl._create_unverified_context
+    except AttributeError:
+        pass
+    else:
+        ssl._create_default_https_context = _create_unverified_https_context
+
+    # Download required NLTK data
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        nltk.download('punkt')
+    try:
+        nltk.data.find('tokenizers/punkt_tab')
+    except LookupError:
+        nltk.download('punkt_tab')
 
 def setup_project_structure(code_root, data_root):
     """Set up project directories and config files"""
@@ -56,6 +76,9 @@ def evaluate_captions(generated_caption, ground_truth_captions):
     return bleu_score
 
 def main():
+    # Add this line near the start of main(), before any NLTK operations
+    setup_nltk()
+    
     # Define root directories
     code_root = '/content/project/Multimodal_Image_to_Text_Exp_2/Multimodal Image-to-Text Exp 2'
     data_root = '/content/project/Multimodal_Image_to_Text_Exp_2'
@@ -73,9 +96,6 @@ def main():
     # Load configuration
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
-    
-    # Download NLTK data
-    nltk.download('punkt', quiet=True)
     
     # Initialize pipeline
     pipeline = CaptionPipeline(config)
