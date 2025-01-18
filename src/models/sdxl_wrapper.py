@@ -26,15 +26,18 @@ class SDXLModel:
         # Process image
         inputs = self.processor(image, return_tensors="pt").to(self.device)
         
-        # Generate caption with beam search
+        # Generate caption with updated parameters
         outputs = self.model.generate(
             **inputs,
             max_length=self.config['pipeline']['max_length'],
             num_beams=5,
-            num_return_sequences=1,
-            temperature=0.7,
+            do_sample=True,  # Enable sampling
+            temperature=0.7,  # Temperature for sampling
+            top_k=50,        # Limit vocabulary to top k tokens
+            top_p=0.9,       # Nucleus sampling parameter
             repetition_penalty=1.2,
-            length_penalty=1.0
+            length_penalty=1.0,
+            num_return_sequences=1
         )
         
         # Decode caption
