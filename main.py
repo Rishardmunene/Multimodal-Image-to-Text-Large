@@ -22,8 +22,11 @@ def evaluate_captions(generated_caption, ground_truth_captions):
     return bleu_score
 
 def main():
+    # Get the absolute path to the project root
+    project_root = '/content/project/Multimodal_Image_to_Text_Exp_2'
+    
     # Load configuration
-    config = yaml.safe_load(open('config/config.yaml'))
+    config = yaml.safe_load(open(os.path.join(project_root, 'config/config.yaml')))
     
     # Initialize pipeline
     pipeline = CaptionPipeline(config)
@@ -37,45 +40,61 @@ def main():
         }
     }
     
-    # Absolute path to annotations
-    annotations_path = '/content/project/Multimodal_Image_to_Text_Exp_2/data/annotations/captions_val2017.json'
+    # Set up absolute paths
+    annotations_path = os.path.join(project_root, 'data/annotations/captions_val2017.json')
+    images_dir = os.path.join(project_root, 'data/images/val2017')
     
     # Process COCO validation set
-    coco = COCO(annotations_path)  # Use the absolute path here
+    coco = COCO(annotations_path)
     img_ids = coco.getImgIds()
     
     # Process images with progress bar
     for img_id in tqdm(img_ids[:100], desc="Processing images"):
         img_info = coco.loadImgs(img_id)[0]
-        image_path = os.path.join('data/images/val2017', img_info['file_name'])
+        # Use absolute path for images
+        image_path = os.path.join(images_dir, img_info['file_name'])
         
+        if not os.path.exists(image_path):
+            print(f"Warning: Image not found: {image_path}")
+            continue
+            
         # Get ground truth captions
         ann_ids = coco.getAnnIds(imgIds=img_id)
         anns = coco.loadAnns(ann_ids)
         gt_captions = [ann['caption'] for ann in anns]
         
-        # Generate caption
-        generated_caption = pipeline.generate_caption(image_path)
-        
-        # Calculate BLEU score
-        bleu_score = evaluate_captions(generated_caption, gt_captions)
-        
-        # Store results
-        results['captions'].append({
-            'image_id': img_id,
-            'image_file': img_info['file_name'],
-            'generated_caption': generated_caption,
-            'ground_truth_captions': gt_captions,
-            'bleu_score': bleu_score
-        })
-        results['metrics']['bleu_scores'].append(bleu_score)
+        try:
+            # Generate caption
+            generated_caption = pipeline.generate_caption(image_path)
+            
+            # Calculate BLEU score
+            bleu_score = evaluate_captions(generated_caption, gt_captions)
+            
+            # Store results
+            results['captions'].append({
+                'image_id': img_id,
+                'image_file': img_info['file_name'],
+                'generated_caption': generated_caption,
+                'ground_truth_captions': gt_captions,
+                'bleu_score': bleu_score
+            })
+            results['metrics']['bleu_scores'].append(bleu_score)
+        except Exception as e:
+            print(f"Error processing image {image_path}: {str(e)}")
+            continue
     
     # Calculate and print average BLEU score
-    avg_bleu = np.mean(results['metrics']['bleu_scores'])
-    print(f"\nAverage BLEU score: {avg_bleu:.4f}")
+    if results['metrics']['bleu_scores']:
+        avg_bleu = np.mean(results['metrics']['bleu_scores'])
+        print(f"\nAverage BLEU score: {avg_bleu:.4f}")
+    
+    # Create results directory if it doesn't exist
+    results_dir = os.path.join(project_root, 'results')
+    os.makedirs(results_dir, exist_ok=True)
     
     # Save results
-    with open('results/caption_results.json', 'w') as f:
+    results_path = os.path.join(results_dir, 'caption_results.json')
+    with open(results_path, 'w') as f:
         json.dump(results, f, indent=2)
 
 if __name__ == "__main__":
