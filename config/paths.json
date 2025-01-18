@@ -1,0 +1,7 @@
+{
+    "model_weights": "./weights",
+    "input_images": "./data/input",
+    "output_captions": "./data/output",
+    "logs": "./logs",
+    "temp": "./temp"
+} 
