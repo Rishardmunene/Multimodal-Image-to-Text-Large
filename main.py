@@ -37,8 +37,11 @@ def main():
         }
     }
     
+    # Absolute path to annotations
+    annotations_path = '/content/project/Multimodal_Image_to_Text_Exp_2/data/annotations/captions_val2017.json'
+    
     # Process COCO validation set
-    coco = COCO('data/annotations/captions_val2017.json')
+    coco = COCO(annotations_path)  # Use the absolute path here
     img_ids = coco.getImgIds()
     
     # Process images with progress bar
@@ -77,3 +80,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+    
