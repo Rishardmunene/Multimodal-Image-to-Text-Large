@@ -12,6 +12,7 @@ import numpy as np
 import ssl
 import time
 from datetime import datetime, timedelta
+from collections import defaultdict
 
 def setup_nltk():
     """Set up NLTK resources"""
@@ -115,6 +116,152 @@ def format_time(seconds):
     """Format time duration"""
     return str(timedelta(seconds=int(seconds)))
 
+def validate_pipeline(pipeline, coco, data_root, batch_size=32, max_samples=1000):
+    """Comprehensive validation on larger dataset"""
+    results = {
+        'metrics': {
+            'bleu_scores': defaultdict(list),
+            'rouge_scores': defaultdict(list),
+            'meteor_scores': [],
+            'cider_scores': [],
+            'word_overlap_ratios': []
+        },
+        'samples': [],
+        'timing': {
+            'start_time': datetime.now().isoformat(),
+            'batch_times': [],
+            'average_time_per_image': None
+        }
+    }
+    
+    # Get validation image IDs
+    img_ids = coco.getImgIds()
+    if max_samples:
+        img_ids = img_ids[:max_samples]
+    
+    # Process in batches
+    batches = [img_ids[i:i + batch_size] for i in range(0, len(img_ids), batch_size)]
+    
+    with tqdm(total=len(img_ids), desc="Validating") as pbar:
+        for batch_idx, batch_ids in enumerate(batches):
+            batch_start = time.time()
+            batch_results = process_batch(
+                batch_ids, pipeline, coco, data_root, pbar
+            )
+            
+            # Update metrics
+            for metric_type, scores in batch_results['metrics'].items():
+                results['metrics'][metric_type].extend(scores)
+            
+            # Store sample results
+            results['samples'].extend(batch_results['samples'])
+            
+            # Update timing
+            batch_time = time.time() - batch_start
+            results['timing']['batch_times'].append(batch_time)
+            
+            # Display batch statistics
+            display_batch_stats(batch_results, batch_idx + 1, len(batches))
+    
+    # Calculate final statistics
+    compute_final_statistics(results)
+    
+    return results
+
+def process_batch(batch_ids, pipeline, coco, data_root, pbar):
+    """Process a batch of images"""
+    batch_results = {
+        'metrics': defaultdict(list),
+        'samples': []
+    }
+    
+    for img_id in batch_ids:
+        try:
+            # Get image info and ground truth
+            img_info = coco.loadImgs(img_id)[0]
+            image_path = os.path.join(data_root, 'data/images/val2017', img_info['file_name'])
+            
+            # Get ground truth captions
+            ann_ids = coco.getAnnIds(imgIds=img_id)
+            gt_captions = [ann['caption'] for ann in coco.loadAnns(ann_ids)]
+            
+            # Generate caption
+            generated_caption = pipeline.generate_caption(image_path)
+            
+            # Calculate metrics
+            metrics = calculate_metrics(generated_caption, gt_captions)
+            
+            # Update batch results
+            for metric_name, score in metrics.items():
+                batch_results['metrics'][metric_name].append(score)
+            
+            batch_results['samples'].append({
+                'image_id': img_id,
+                'file_name': img_info['file_name'],
+                'generated_caption': generated_caption,
+                'ground_truth': gt_captions,
+                'metrics': metrics
+            })
+            
+            pbar.update(1)
+            
+        except Exception as e:
+            print(f"\nError processing image {img_id}: {str(e)}")
+            continue
+    
+    return batch_results
+
+def calculate_metrics(generated_caption, reference_captions):
+    """Calculate comprehensive metrics"""
+    metrics = {}
+    
+    # BLEU scores with smoothing
+    smoother = SmoothingFunction()
+    ref_tokens = [nltk.word_tokenize(cap.lower()) for cap in reference_captions]
+    gen_tokens = nltk.word_tokenize(generated_caption.lower())
+    
+    # Calculate BLEU scores
+    for n in range(1, 5):
+        weights = tuple([1.0/n] * n + [0.0] * (4-n))
+        metrics[f'bleu-{n}'] = sentence_bleu(
+            ref_tokens, gen_tokens,
+            weights=weights,
+            smoothing_function=smoother.method7
+        )
+    
+    # Word overlap ratio
+    unique_gen_words = set(gen_tokens)
+    unique_ref_words = set(word for ref in ref_tokens for word in ref)
+    metrics['word_overlap_ratio'] = len(unique_gen_words & unique_ref_words) / len(unique_gen_words) if unique_gen_words else 0
+    
+    return metrics
+
+def display_batch_stats(batch_results, batch_num, total_batches):
+    """Display batch statistics"""
+    print(f"\nBatch {batch_num}/{total_batches} Statistics:")
+    for metric_name, scores in batch_results['metrics'].items():
+        if scores:
+            avg_score = np.mean(scores)
+            print(f"Average {metric_name}: {avg_score:.4f}")
+
+def compute_final_statistics(results):
+    """Compute and add final statistics to results"""
+    results['final_metrics'] = {}
+    
+    # Calculate averages for all metrics
+    for metric_type, scores in results['metrics'].items():
+        if scores:
+            results['final_metrics'][f'avg_{metric_type}'] = float(np.mean(scores))
+            results['final_metrics'][f'std_{metric_type}'] = float(np.std(scores))
+    
+    # Calculate timing statistics
+    batch_times = results['timing']['batch_times']
+    if batch_times:
+        results['timing']['average_time_per_batch'] = float(np.mean(batch_times))
+        results['timing']['total_processing_time'] = float(np.sum(batch_times))
+        total_samples = len([s for s in results['samples'] if 'metrics' in s])
+        results['timing']['average_time_per_image'] = results['timing']['total_processing_time'] / total_samples if total_samples > 0 else 0
+
 def main():
     setup_nltk()
     
@@ -190,100 +337,22 @@ def main():
     coco = COCO(annotations_path)
     img_ids = coco.getImgIds()
     
-    # Process images with enhanced progress tracking
-    total_images = min(100, len(img_ids))
-    with tqdm(total=total_images, desc="Processing images") as pbar:
-        for img_id in img_ids[:total_images]:
-            loop_start = time.time()
-            
-            img_info = coco.loadImgs(img_id)[0]
-            # Use absolute path for images
-            image_path = os.path.join(images_dir, img_info['file_name'])
-            
-            if not os.path.exists(image_path):
-                print(f"Warning: Image not found: {image_path}")
-                continue
-            
-            # Get ground truth captions
-            ann_ids = coco.getAnnIds(imgIds=img_id)
-            anns = coco.loadAnns(ann_ids)
-            gt_captions = [ann['caption'] for ann in anns]
-            
-            try:
-                generated_caption = pipeline.generate_caption(image_path)
-                bleu_scores = evaluate_captions(generated_caption, gt_captions)
-                
-                # Update metrics
-                for score_type, score in bleu_scores.items():
-                    results['metrics']['bleu_scores'][score_type].append(score)
-                
-                # Store detailed results
-                results['captions'].append({
-                    'image_id': img_id,
-                    'image_file': img_info['file_name'],
-                    'generated_caption': generated_caption,
-                    'ground_truth_captions': gt_captions,
-                    'bleu_scores': bleu_scores,
-                    'processing_time': time.time() - loop_start
-                })
-                
-                processed_images += 1
-                pbar.update(1)
-                
-                # Calculate and display progress statistics
-                elapsed_time = time.time() - start_time
-                images_per_second = processed_images / elapsed_time
-                pbar.set_postfix({
-                    'Speed': f'{images_per_second:.2f} img/s',
-                    'Elapsed': format_time(elapsed_time)
-                })
-                
-            except Exception as e:
-                warning_msg = f"Error processing image {image_path}: {str(e)}"
-                warnings.append(warning_msg)
-                print(f"\nWarning: {warning_msg}")
-                continue
+    # Run validation
+    validation_results = validate_pipeline(
+        pipeline=pipeline,
+        coco=coco,
+        data_root=data_root,
+        batch_size=32,
+        max_samples=1000  # Increase this for larger validation
+    )
     
-    # Calculate final statistics
-    end_time = time.time()
-    total_duration = end_time - start_time
-    
-    # Update timing information
-    results['timing'].update({
-        'end_time': datetime.now().isoformat(),
-        'total_duration': total_duration,
-        'images_per_second': processed_images / total_duration
-    })
-    
-    # Calculate and display final metrics
-    print("\nProcessing Complete!")
-    print(f"\nProgress Summary:")
-    print(f"Started at 0% (0/{total_images} images)")
-    print(f"Finished at 100% ({processed_images}/{total_images} images)")
-    print(f"Total processing time: {format_time(total_duration)}")
-    print(f"Final processing speed: {processed_images/total_duration:.2f} images per second")
-    
-    print("\nBLEU Score Summary:")
-    for score_type in results['metrics']['bleu_scores']:
-        scores = results['metrics']['bleu_scores'][score_type]
-        if scores:
-            avg_score = np.mean(scores)
-            print(f"Average {score_type}: {avg_score:.4f}")
-    
-    if warnings:
-        print("\nWarnings encountered:")
-        for warning in warnings:
-            print(f"- {warning}")
-    
-    # Save detailed results
-    results_dir = os.path.join(data_root, 'results')
-    os.makedirs(results_dir, exist_ok=True)
-    results_path = os.path.join(results_dir, 'caption_results.json')
-    
+    # Save results
+    results_path = os.path.join(data_root, 'results/validation_results.json')
+    os.makedirs(os.path.dirname(results_path), exist_ok=True)
     with open(results_path, 'w') as f:
-        json.dump(results, f, indent=2)
+        json.dump(validation_results, f, indent=2)
     
-    print(f"\nDetailed results saved to: {results_path}")
+    print(f"\nValidation results saved to: {results_path}")
 
 if __name__ == "__main__":
     main()
