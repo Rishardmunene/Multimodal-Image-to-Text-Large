@@ -120,18 +120,19 @@ def validate_pipeline(pipeline, coco, data_root, batch_size=32, max_samples=1000
     """Comprehensive validation on larger dataset"""
     results = {
         'metrics': {
-            'bleu_scores': defaultdict(list),
-            'rouge_scores': defaultdict(list),
-            'meteor_scores': [],
-            'cider_scores': [],
-            'word_overlap_ratios': []
+            'bleu_scores': {
+                'bleu-1': [],
+                'bleu-2': [],
+                'bleu-combined': [],
+                'word_overlap_ratio': []
+            },
+            'timing': {
+                'start_time': datetime.now().isoformat(),
+                'batch_times': [],
+                'average_time_per_image': None
+            }
         },
-        'samples': [],
-        'timing': {
-            'start_time': datetime.now().isoformat(),
-            'batch_times': [],
-            'average_time_per_image': None
-        }
+        'samples': []
     }
     
     # Get validation image IDs
@@ -150,15 +151,16 @@ def validate_pipeline(pipeline, coco, data_root, batch_size=32, max_samples=1000
             )
             
             # Update metrics
-            for metric_type, scores in batch_results['metrics'].items():
-                results['metrics'][metric_type].extend(scores)
+            for metric_name, scores in batch_results['metrics'].items():
+                if metric_name in results['metrics']['bleu_scores']:
+                    results['metrics']['bleu_scores'][metric_name].extend(scores)
             
             # Store sample results
             results['samples'].extend(batch_results['samples'])
             
             # Update timing
             batch_time = time.time() - batch_start
-            results['timing']['batch_times'].append(batch_time)
+            results['metrics']['timing']['batch_times'].append(batch_time)
             
             # Display batch statistics
             display_batch_stats(batch_results, batch_idx + 1, len(batches))
@@ -171,7 +173,12 @@ def validate_pipeline(pipeline, coco, data_root, batch_size=32, max_samples=1000
 def process_batch(batch_ids, pipeline, coco, data_root, pbar):
     """Process a batch of images"""
     batch_results = {
-        'metrics': defaultdict(list),
+        'metrics': {
+            'bleu-1': [],
+            'bleu-2': [],
+            'bleu-combined': [],
+            'word_overlap_ratio': []
+        },
         'samples': []
     }
     
@@ -193,7 +200,8 @@ def process_batch(batch_ids, pipeline, coco, data_root, pbar):
             
             # Update batch results
             for metric_name, score in metrics.items():
-                batch_results['metrics'][metric_name].append(score)
+                if metric_name in batch_results['metrics']:
+                    batch_results['metrics'][metric_name].append(score)
             
             batch_results['samples'].append({
                 'image_id': img_id,
@@ -249,18 +257,18 @@ def compute_final_statistics(results):
     results['final_metrics'] = {}
     
     # Calculate averages for all metrics
-    for metric_type, scores in results['metrics'].items():
+    for metric_name, scores in results['metrics']['bleu_scores'].items():
         if scores:
-            results['final_metrics'][f'avg_{metric_type}'] = float(np.mean(scores))
-            results['final_metrics'][f'std_{metric_type}'] = float(np.std(scores))
+            results['final_metrics'][f'avg_{metric_name}'] = float(np.mean(scores))
+            results['final_metrics'][f'std_{metric_name}'] = float(np.std(scores))
     
     # Calculate timing statistics
-    batch_times = results['timing']['batch_times']
+    batch_times = results['metrics']['timing']['batch_times']
     if batch_times:
-        results['timing']['average_time_per_batch'] = float(np.mean(batch_times))
-        results['timing']['total_processing_time'] = float(np.sum(batch_times))
+        results['metrics']['timing']['average_time_per_batch'] = float(np.mean(batch_times))
+        results['metrics']['timing']['total_processing_time'] = float(np.sum(batch_times))
         total_samples = len([s for s in results['samples'] if 'metrics' in s])
-        results['timing']['average_time_per_image'] = results['timing']['total_processing_time'] / total_samples if total_samples > 0 else 0
+        results['metrics']['timing']['average_time_per_image'] = results['metrics']['timing']['total_processing_time'] / total_samples if total_samples > 0 else 0
 
 def main():
     setup_nltk()
